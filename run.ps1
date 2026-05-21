@@ -7,7 +7,7 @@
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
 
-$BackendPort  = if ($env:BACKEND_PORT)  { $env:BACKEND_PORT }  else { "8002" }
+$BackendPort  = if ($env:BACKEND_PORT)  { $env:BACKEND_PORT }  else { "8765" }
 $FrontendPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "3000" }
 
 # --- Load backend/.env into PROCESS env vars (zeby Pydantic Settings je widzial niezaleznie od cwd) ---

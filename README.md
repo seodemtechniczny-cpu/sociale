@@ -20,9 +20,9 @@ Stack: FastAPI + Next.js. Wymaga klucza OpenAI API.
 
 Oba skrypty uruchamiają backend (uvicorn) + frontend (Next.js) w jednym terminalu z prefiksami `[BE]` i `[FE]`. Ctrl+C zatrzymuje oba.
 
-- Backend: http://localhost:8002
+- Backend: http://localhost:8765
 - Frontend (dashboard): **http://localhost:3000**
-- API docs (Swagger): http://localhost:8002/docs
+- API docs (Swagger): http://localhost:8765/docs
 
 Override portów:
 ```bash

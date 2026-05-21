@@ -5,7 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-BACKEND_PORT="${BACKEND_PORT:-8002}"
+BACKEND_PORT="${BACKEND_PORT:-8765}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 
 prefix() {
