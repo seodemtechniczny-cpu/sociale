@@ -12,15 +12,27 @@ $FrontendPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "3000" }
 
 # --- Sanity checks ---
 
-if (-not (Test-Path "backend\venv")) {
-    Write-Host "BŁĄD: backend\venv nie istnieje." -ForegroundColor Red
+$pythonExe = Join-Path $PSScriptRoot "backend\venv\Scripts\python.exe"
+if (-not (Test-Path $pythonExe)) {
+    Write-Host "BŁĄD: backend\venv\Scripts\python.exe nie istnieje." -ForegroundColor Red
     Write-Host "  Uruchom: cd backend; python -m venv venv; .\venv\Scripts\Activate.ps1; pip install -r requirements.txt"
+    Read-Host "Enter aby zamknąć"
     exit 1
 }
 
 if (-not (Test-Path "frontend\node_modules")) {
     Write-Host "BŁĄD: frontend\node_modules nie istnieje." -ForegroundColor Red
     Write-Host "  Uruchom: cd frontend; npm install"
+    Read-Host "Enter aby zamknąć"
+    exit 1
+}
+
+# Verify uvicorn actually installed in venv
+& $pythonExe -c "import uvicorn" 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "BŁĄD: uvicorn nie jest zainstalowany w venv." -ForegroundColor Red
+    Write-Host "  Uruchom: cd backend; .\venv\Scripts\Activate.ps1; pip install -r requirements.txt"
+    Read-Host "Enter aby zamknąć"
     exit 1
 }
 
@@ -30,55 +42,70 @@ function Test-PortInUse($Port) {
 }
 
 if (Test-PortInUse $BackendPort) {
-    Write-Host "BŁĄD: port $BackendPort zajęty. Ustaw `$env:BACKEND_PORT='inny-port' przed uruchomieniem." -ForegroundColor Red
+    Write-Host "BŁĄD: port $BackendPort zajęty. Ustaw `$env:BACKEND_PORT='8003' przed uruchomieniem." -ForegroundColor Red
+    Read-Host "Enter aby zamknąć"
     exit 1
 }
 if (Test-PortInUse $FrontendPort) {
-    Write-Host "BŁĄD: port $FrontendPort zajęty. Ustaw `$env:FRONTEND_PORT='inny-port' przed uruchomieniem." -ForegroundColor Red
+    Write-Host "BŁĄD: port $FrontendPort zajęty. Ustaw `$env:FRONTEND_PORT='3001' przed uruchomieniem." -ForegroundColor Red
+    Read-Host "Enter aby zamknąć"
     exit 1
 }
 
-Write-Host "Sociale dev → backend :$BackendPort, frontend :$FrontendPort (Ctrl+C aby zatrzymać)" -ForegroundColor Green
+Write-Host "Sociale dev -> backend :$BackendPort, frontend :$FrontendPort (Ctrl+C aby zatrzymac)" -ForegroundColor Green
+Write-Host "Dashboard: http://localhost:$FrontendPort" -ForegroundColor Green
+Write-Host ""
 
-# --- Start processes ---
+# --- Start processes (no Activate.ps1 — bezpośrednio python.exe -m uvicorn) ---
 
-$beScript = @"
+$beScript = [scriptblock]::Create(@"
 Set-Location '$PSScriptRoot\backend'
-& '.\venv\Scripts\Activate.ps1'
-uvicorn app.main:app --reload --port $BackendPort 2>&1 | ForEach-Object { Write-Host "[BE] `$_" -ForegroundColor Cyan }
-"@
+& '$pythonExe' -m uvicorn app.main:app --reload --port $BackendPort 2>&1 | ForEach-Object {
+    Write-Host "[BE] `$_" -ForegroundColor Cyan
+}
+"@)
 
-$feScript = @"
+$feScript = [scriptblock]::Create(@"
 Set-Location '$PSScriptRoot\frontend'
 `$env:NEXT_PUBLIC_API_URL = 'http://localhost:$BackendPort'
-npm run dev 2>&1 | ForEach-Object { Write-Host "[FE] `$_" -ForegroundColor Magenta }
-"@
+npm run dev 2>&1 | ForEach-Object {
+    Write-Host "[FE] `$_" -ForegroundColor Magenta
+}
+"@)
 
-$beJob = Start-Job -Name "sociale-backend"  -ScriptBlock ([scriptblock]::Create($beScript))
-$feJob = Start-Job -Name "sociale-frontend" -ScriptBlock ([scriptblock]::Create($feScript))
+$beJob = Start-Job -Name "sociale-backend"  -ScriptBlock $beScript
+$feJob = Start-Job -Name "sociale-frontend" -ScriptBlock $feScript
 
-# --- Cleanup on Ctrl+C / exit ---
+# --- Main loop: stream output until both jobs finish ---
 
 $cleanup = {
-    Write-Host "`nZatrzymuję serwery..." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Zatrzymuje serwery..." -ForegroundColor Yellow
+    # Flush final output before stopping
+    Get-Job -Name "sociale-*" -ErrorAction SilentlyContinue | Receive-Job -ErrorAction SilentlyContinue
     Get-Job -Name "sociale-*" -ErrorAction SilentlyContinue | ForEach-Object {
         Stop-Job  $_ -ErrorAction SilentlyContinue
         Remove-Job $_ -Force -ErrorAction SilentlyContinue
     }
-    # Make sure ports are freed (kill child python/node processes)
+    # Free ports if anything still bound
     Get-NetTCPConnection -LocalPort $BackendPort, $FrontendPort -State Listen -ErrorAction SilentlyContinue |
-        ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+        ForEach-Object {
+            Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
+        }
 }
-Register-EngineEvent PowerShell.Exiting -Action $cleanup | Out-Null
 
 try {
     while ($true) {
-        Get-Job -Name "sociale-*" | Receive-Job
-        if ((Get-Job -Name "sociale-backend").State  -ne "Running" -and
-            (Get-Job -Name "sociale-frontend").State -ne "Running") { break }
+        Get-Job -Name "sociale-*" -ErrorAction SilentlyContinue | Receive-Job
+        $active = Get-Job -Name "sociale-*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.State -in 'NotStarted','Running' }
+        if (-not $active) { break }
         Start-Sleep -Milliseconds 500
     }
 }
 finally {
     & $cleanup
 }
+
+Write-Host ""
+Read-Host "Enter aby zamknac okno"
